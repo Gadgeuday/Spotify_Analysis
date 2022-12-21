@@ -1,0 +1,75 @@
+---
+title: "Final_Project_R"
+author: "Uday Gadge"
+date: "2022-11-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Spotify data collection
+ 
+The data is collected through the spotify API. The API is a free resource that spotify provides. Let's use this to collect some data.
+
+The first step is to generate a spotify access token from the client ID and password generated on the spotify developer website.
+
+```{r}
+library(spotifyr)
+Sys.setenv(SPOTIFY_CLIENT_ID = '39fab145f77749eb9e00395cb262d536')
+Sys.setenv(SPOTIFY_CLIENT_SECRET = '6e8c8e372ede44eb9f233a9485f50538')
+Sys.setenv(redirect_uri = 'http://localhost:8888/callback')
+
+access_token <- get_spotify_access_token()
+```
+
+- Get top 30 artists for every genre
+- Get their music libraries
+- append for every genre and store it to a csv file
+
+```{r,include = FALSE}
+library(dplyr)
+library(tidyverse)
+path <- "C:/Users/gadge/OneDrive/Desktop/InfoStats_R/"
+genres <- c("pop","edm","rap","lounge","classical","alternative","house","Broadway","country","jazz","disco","folk")
+
+for (genre in genres){
+  df <- get_genre_artists(genre = genre, limit = 30) %>%
+    select(id,name,popularity,genre,followers.total)
+  artists <- df$id
+  datalists = vector("list", length = length(artists))
+  i=1
+  for (artist in artists){
+    dat <- get_artist_audio_features(artist = artist)
+    datalists[[i]] <- dat
+    i = i+1
+  }
+  artist_df <- do.call(rbind, datalists)
+  df_artist <- left_join(df,artist_df,by = c("id"="artist_id"))
+  df_artist <- df_artist %>% select(-artists,-album_images,-available_markets )
+  filename <- paste(genre,".csv")
+  write.csv(df_artist,paste(path,filename,sep = ""))
+  
+}
+```
+Adding all genres to one data frame
+
+
+```{r, include = FALSE}
+path <- "C:/Users/gadge/OneDrive/Desktop/InfoStats_R/"
+genres <- c("pop","edm","rap","lounge","jazz","country","indie","alternative","folk")
+i = 1
+datalists = vector("list", length = length(genres))
+for (genre in genres){
+  filename <- paste(genre,".csv")
+  genre_df <- read_csv(paste(path, filename, sep = ""))
+  datalists[[i]] = genre_df
+  i = i+1
+}
+df <- do.call(rbind, datalists)
+```
+```{r}
+filename <- "Spotify_data.csv"
+write_csv(df,paste(path,filename,sep=""))
+```
+

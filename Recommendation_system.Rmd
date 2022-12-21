@@ -1,0 +1,302 @@
+---
+title: "Recommendation_spotify"
+author: "Uday Gadge"
+date: "2022-12-11"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Recommendation spotify
+
+For this I am using my 2022 wrapped top songs as a base. Spotify API also provides artists that are similar to an aritst. I picked a few of my favourite artists and got artists similar to them. I can calculate distances of these songs from this library and the top songs of 2022.
+path <- "C:/Users/gadge/OneDrive/Desktop/InfoStats_R/"
+filename <- "Spotify_data.csv"
+df <- read_csv(paste(path,filename,sep=""))
+getting data
+
+```{r,include=FALSE}
+library(dplyr)
+library(tidyverse)
+library(gridExtra)
+library(proxy)
+library(ggforce)
+```
+
+```{r,include = FALSE}
+path <- "C:/Users/gadge/OneDrive/Desktop/InfoStats_R/"
+filename <- "Top_songs_2022.csv"
+top_songs <- read_csv(paste(path,filename,sep=""))
+```
+
+```{r,include=FALSE}
+filename <- "library_recommender.csv"
+library <- read_csv(paste(path,filename,sep=""))
+```
+
+```{r}
+colnames(top_songs)
+```
+```{r}
+top_songs$album_release_year <- format(as.Date(top_songs$track.album.release_date,
+                                        format="%Y-%m-%d"),"%Y")
+top_songs <- top_songs %>% select(-track.artists,-track.explicit,-track.popularity,
+                                  -track.album.release_date)
+```
+
+```{r}
+head(top_songs)
+```
+
+```{r}
+dim(top_songs)
+dim(library)
+```
+
+
+
+```{r}
+head(library)
+```
+```{r}
+library <- library %>% select(track_id,artist_id,album_id,
+                              track_name,artist_name, album_release_year, 
+                              duration_ms, danceability, energy, loudness, 
+                              key, mode, speechiness, acousticness, 
+                              instrumentalness, liveness, valence, 
+                              tempo)
+head(library)
+```
+```{r}
+top_songs <- top_songs %>% rename("track_id" = "track.id",
+                     "track_name" = "track.name",
+                     "duration_ms" = "track.duration_ms")
+head(top_songs)
+```
+
+```{r}
+song_features_num <- c("danceability","energy","loudness","acousticness","instrumentalness",
+                   "liveness","valence","tempo","album_release_year")
+
+song_features_cat <- c("key","mode")
+```
+
+```{r}
+identifiers <- c("track_id","track_name")
+
+top_songs <- top_songs %>% dplyr::select(any_of(c(identifiers,song_features_num,
+                                                  song_features_cat)))
+```
+
+```{r}
+library <- library %>% dplyr::select(any_of(c(identifiers,song_features_num,
+                                                  song_features_cat)))
+head(library)
+```
+
+```{r}
+library <- library %>% filter(!(track_id %in% top_songs$track_id))
+dim(library)
+```
+
+```{r}
+top_songs$top_song <- "Yes"
+library$top_song <- "No"
+
+df <- rbind(top_songs,library)
+```
+
+```{r}
+df <- data.frame(df)
+head(df)
+```
+
+
+```{r}
+df$album_release_year <- as.double(df$album_release_year)
+head(df)
+```
+```{r}
+sum(is.na(df))
+```
+```{r}
+df <- na.omit(df)
+```
+
+```{r}
+dim(df)
+```
+
+
+```{r}
+for (col in song_features_num){
+  #print(col)
+  #df[,col] <- as.numeric(df[,col])
+  df[,col] <- (df[,col] - min(df[,col]))/(max(df[,col])-min(df[,col]))
+}
+head(df)
+```
+
+```{r}
+df$key <- as.factor(df$key)
+df$mode <- as.factor(df$mode)
+
+```
+
+
+```{r}
+modes <- df %>% 
+  dplyr::group_by(mode) %>% 
+  dplyr::summarize(mode_prob = (n())/(dim(df)[1]))
+keys <- df %>% 
+  dplyr::group_by(key) %>% 
+  dplyr::summarize(key_prob = (n())/(dim(df)[1]))
+modes
+```
+
+```{r}
+df <- left_join(df,modes,by="mode")
+df <- left_join(df,keys,by="key")
+head(df)
+```
+
+```{r}
+song_features_cat <- c("key_prob", "mode_prob")
+a <- df[df$top_song == "Yes",c(song_features_num,song_features_cat)]
+b <- df[df$top_song == "No",c(song_features_num,song_features_cat)]
+class(a)
+```
+```{r}
+head(a)
+```
+```{r}
+distance_prob <- function(v1,v2){
+  sqrt(sum((v1[1:8]-v2[1:8])^2) +
+         sum((v1[9:11] == v2[9:11])*v1[9:11]*v2[9:11])+
+         sum((v1[9:11] != v2[9:11])*(1-v1[9:11]*v2[9:11])))
+}
+```
+
+
+
+```{r}
+library(proxy)
+mat <- proxy::dist(a,b,method = distance_prob)
+```
+
+
+```{r}
+dim(mat)
+```
+
+```{r}
+mat[1:3,2:5]
+```
+
+```{r}
+which.min(mat[1,2:5])
+```
+```{r}
+which.min(mat[1,2:5])-1
+```
+
+
+```{r}
+similar <- c()
+for (i in (1:dim(mat)[1])){
+  similar <- c(similar, which.min(mat[i,]))
+}
+```
+
+```{r}
+similar
+```
+```{r}
+top_song_matched <- df %>% filter(top_song == "Yes")
+top_song_matched$similar_index <- similar
+top_song_matched
+```
+
+```{r}
+similar_song_id <- c()
+similar_song_names <- c()
+for (i in similar){
+  similar_song_id <- c(similar_song_id,df$track_id[[i+98]])
+  similar_song_names <- c(similar_song_names,df$track_name[[i+98]])
+}
+similar_song_names
+```
+
+
+```{r}
+mean_distance <- c()
+for (i in (1:dim(mat)[2])){
+  mean_distance <- c(mean_distance, mean(mat[,i]))
+}
+
+```
+
+```{r}
+mean_distances <- data.frame(mean_distance, index = seq(1,length(mean_distance)))
+head(mean_distances)
+```
+
+```{r}
+head(arrange(mean_distances,mean_distances$mean_distance))
+```
+```{r}
+top_30 <- (arrange(mean_distances,mean_distances$mean_distance))$index[1:30]
+```
+
+```{r}
+top_30_song_id <- c()
+top_30_song_names <- c()
+for (i in top_30){
+  top_30_song_id <- c(top_30_song_id,df$track_id[[i+98]])
+  top_30_song_names <- c(top_30_song_names,df$track_name[[i+98]])
+}
+top_30_song_names
+
+```
+```{r}
+pc <- prcomp(df[,song_features_num],center = TRUE)
+```
+
+```{r}
+attributes(pc)
+```
+
+```{r}
+print(pc)
+```
+
+```{r}
+pca_df <- data.frame(predict(pc,df[,song_features_num]))
+data_pca <- cbind(df,pca_df)
+head(data_pca)
+```
+
+```{r}
+data_pca %>% filter(top_song == "Yes" | track_id %in% similar_song_id) %>% 
+  ggplot(aes(PC1,PC2,color = top_song)) + geom_point()+
+  geom_text(aes(PC1,PC2,label = track_name),size = 1.5) + xlab("") +ylab("")+
+  theme(axis.text.y=element_blank(),axis.text.x=element_blank(),
+        plot.title = element_text(hjust = 0.5))+
+  ggtitle("Individually Similar Songs")
+```
+
+```{r}
+data_pca %>% filter(top_song == "Yes" | track_id %in% top_30_song_id) %>% 
+  ggplot(aes(PC1,PC2,color = top_song)) + geom_point()+
+  geom_text(aes(PC1,PC2,label = track_name),size = 1.5) + xlab("") +ylab("")+
+  theme(axis.text.y=element_blank(),axis.text.x=element_blank(),
+        plot.title = element_text(hjust = 0.5))+
+  ggtitle("Overall Similar Songs")
+
+```
+
+

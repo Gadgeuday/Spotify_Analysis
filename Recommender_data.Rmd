@@ -1,0 +1,222 @@
+---
+title: "Recommender_data"
+author: "Uday Gadge"
+date: "2022-12-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE}
+library(dplyr)
+library(tidyverse)
+```
+
+## Gathering data for recommender system
+
+```{r}
+library(spotifyr)
+Sys.setenv(SPOTIFY_CLIENT_ID = '39fab145f77749eb9e00395cb262d536')
+Sys.setenv(SPOTIFY_CLIENT_SECRET = '6e8c8e372ede44eb9f233a9485f50538')
+Sys.setenv(redirect_uri = 'http://localhost:8888/callback')
+
+access_token <- get_spotify_access_token()
+```
+
+I have choosen the 2022 wrapped top songs as a base for the recommender system. It has 100 tracks.
+
+```{r}
+playlist <- get_playlist("1HW8XyRWunaQJxLtJJIthD?si=hPBRxMZ-RvqQhM_yznxsJQ&nd=1")$tracks
+```
+
+```{r}
+top_songs_2022 <- playlist$items
+```
+
+Get only required columns
+
+```{r}
+top_songs_2022 <- top_songs_2022 %>% select(track.id,track.name,track.artists,
+                                            track.duration_ms,track.explicit,
+                                            track.popularity,track.album.release_date)
+```
+
+```{r}
+top_songs_2022
+```
+
+Get the audio features of the song
+
+```{r}
+top_songs_features <- get_track_audio_features(top_songs_2022$track.id)
+```
+
+
+
+```{r}
+top_songs_features <- top_songs_features %>% select(id,danceability,energy,
+                                                    key, loudness, mode,
+                                                    speechiness, acousticness,
+                                                    instrumentalness, liveness,
+                                                    valence, tempo)
+```
+```{r}
+top_songs_features
+```
+
+attach it with the song list
+```{r}
+top_songs <- left_join(top_songs_2022,top_songs_features,by = c('track.id' = 'id'))
+```
+
+```{r}
+top_songs
+```
+
+Collecting the artists from this playlist
+
+```{r}
+artists_top <- top_songs$track.artists
+```
+
+```{r}
+length(artists_top)
+```
+```{r}
+artists_top[[2]]
+```
+
+
+```{r}
+artists <- data.frame(id = c(),name = c())
+for (i in 1:length(artists_top)){
+  artists <- rbind(artists,(artists_top[[i]] %>% select(id,name)))
+}
+artists
+```
+```{r}
+artists_freq <- data.frame(table(artists$name, artists$id))
+arrange(artists_freq,desc(artists_freq$Freq))
+```
+```{r}
+artists_needed <- artists_freq %>% filter(Freq > 1)
+colnames(artists_needed) <- c('name','id','Freq')
+artists_needed
+```
+
+Getting artists that are similar
+
+```{r}
+final_artists <- artists_needed %>% select(id, name)
+for (id in artists_needed$id){
+  print(id)
+  final_artists <- rbind(final_artists,
+                         get_related_artists(id) %>% select(id,name))
+}
+final_artists
+```
+
+```{r}
+final_artists <- unique(final_artists)
+```
+```{r}
+final_artists
+```
+
+
+Getting the entire library
+
+```{r}
+datalists <- vector("list", length = length(final_artists))
+artists <- final_artists$id
+i=218
+for (artist in artists[218:220]){
+  dat <- get_artist_audio_features(artist = artist)
+  datalists[[i]] <- dat
+  i = i+1
+}
+artist_df <- do.call(rbind, datalists)
+```
+
+
+
+
+```{r}
+dim(artist_df)
+```
+
+This is too large of a dataset. 
+
+```{r}
+artists_needed
+```
+Just picking favourite artists and their related artists
+
+```{r}
+fav_artists <- c("Geeta Dutt","Shubha Mudgal","Mohammed Rafi",
+                 "Ali Zafar","Begum Akhtar","Mehdi Hassan","Kaavish",
+                 "Hemant Kumar","Noor Jehan")
+```
+
+```{r}
+fav_artists <- final_artists %>% filter(name %in% fav_artists)
+```
+
+```{r}
+related_artists <- fav_artists %>% select(id, name)
+for (id in related_artists$id){
+  print(id)
+  related_artists <- rbind(related_artists,
+                         get_related_artists(id) %>% select(id,name))
+}
+related_artists
+```
+```{r}
+related_artists <- unique(related_artists)
+```
+
+```{r}
+related_artists
+```
+```{r}
+dim(df_songs %>% filter(id %in% related_artists$id))
+```
+```{r}
+dim(df_songs)
+```
+```{r}
+dim(df_songs %>% filter(artist_id %in% related_artists$id))
+```
+```{r}
+df <- df_songs %>% filter(artist_id %in% related_artists$id)
+
+```
+
+```{r}
+unique(df$artist_name)
+```
+
+
+Top songs and the library to csv files
+
+```{r}
+path <- "C:/Users/gadge/OneDrive/Desktop/InfoStats_R/"
+filename <- "Top_songs_2022.csv"
+write_csv(top_songs,paste(path,filename,sep=""))
+```
+
+```{r}
+head(df)
+```
+
+```{r}
+df <- df %>% select(-artists,-album_images,-available_markets )
+```
+
+```{r}
+filename <- "library_recommender.csv"
+write_csv(df,paste(path,filename,sep=""))
+```
+

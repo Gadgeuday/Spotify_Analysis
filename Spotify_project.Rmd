@@ -1,0 +1,506 @@
+---
+title: "Spotify_Project"
+author: "Uday Gadge"
+date: "2022-12-01"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+# Spotify Data Analysis
+
+## Introduction
+
+Spotify is a widely used music player application used by billions of users across the world. The goal of this project is to do an analysis of nine popular genres of music and how it evolved over time.
+
+### Data
+
+I extracted the data through the spotify API. I collected 30 most popular artists per genre and their music collection. This gives an access to different genres of music across time.
+
+### Getting an overview of the data
+
+Loading the necessary libraries and file
+
+```{r, include = FALSE}
+library(dplyr)
+library(tidyverse)
+library(gridExtra)
+library(proxy)
+library(ggforce)
+```
+
+
+```{r,include=FALSE}
+path <- "C:/Users/gadge/OneDrive/Desktop/InfoStats_R/"
+filename <- "Spotify_data.csv"
+df <- read_csv(paste(path,filename,sep=""))
+```
+
+
+```{r}
+head(df)
+```
+```{r}
+colnames(df)
+```
+
+selecting the columns needed for the analysis
+
+```{r}
+df <- df %>% mutate(artist_id = id) %>% 
+  select(track_id,artist_id,album_id,genre,track_name,artist_name,album_name,album_release_date, album_release_year,followers.total, track_number, popularity, duration_ms, danceability, energy, loudness, key, mode, speechiness, acousticness, instrumentalness, liveness, valence, tempo, time_signature, disc_number, key_mode, key_name, key)
+```
+
+```{r}
+head(df)
+```
+```{r}
+colnames(df)
+```
+Let us calculate the average popularity of different genres
+
+```{r}
+df %>% dplyr::group_by(genre) %>% dplyr::summarise(popularity = mean(popularity))
+```
+```{r}
+df <- df %>% dplyr::mutate(decade = round(df$album_release_year/10)*10)
+```
+
+Overall distribution of different genres in the data we have.
+
+```{r}
+
+df %>% dplyr::group_by(genre) %>% dplyr::tally() %>%
+  ggplot(aes(x = genre,y = n,fill = genre)) + 
+  geom_bar(stat = 'identity',alpha = 0.7)+
+  geom_text(aes(label = n),position=position_dodge(width=0.9), vjust=-0.25)+
+  xlab("") + ylab("") + theme(axis.text.y=element_blank())
+```
+Next, let us check how popularity and the number of songs have evolved with time for the genres we have.
+
+```{r}
+library(viridis)
+df %>% dplyr::group_by(genre, album_release_year) %>% 
+  dplyr::summarize(count = n(), popularity = mean(popularity)) %>% 
+  filter(album_release_year >= 1980) %>%
+  ggplot(aes(album_release_year,count)) + 
+  geom_point(aes(color = popularity), size = 3)+ xlab("Year") +ylab("Number of songs") +
+  scale_color_viridis(option = "A", direction = -1) + facet_wrap(~genre)
+```
+
+Clearly pop and rap music are more popular than other genres and it's as expected. Some of the other inferences we can make are:
+
+- lounge music is making a come back as the 2000s music isn't particularly popular compared to the earlier works.
+- The same can be said about alternative music.
+- EDM music these days is not as popular as the music of 2000s
+
+
+Checking for the followers for genres
+
+```{r}
+library(ggrepel)
+artists_followers <- df %>% dplyr::group_by(artist_id, artist_name, genre) %>% 
+  dplyr::summarize(followers = mean(followers.total),songs = dplyr::n()) %>% 
+  dplyr::group_by(genre) %>% 
+  dplyr::mutate(Releases = mean(songs),quant75 = quantile(followers, probs = 0.75)) %>% 
+  dplyr::mutate(outlier = ifelse(followers > 1.6*quant75,"Yes","No"))
+
+outliers <- artists_followers %>% filter(followers > 2.5*quant75)
+
+p <- artists_followers %>% 
+  dplyr::mutate(genre = reorder(genre, followers, FUN = median)) %>%
+  ggplot(aes(genre, followers, fill = Releases)) + geom_boxplot() +
+  geom_text_repel(data = outliers, aes(genre,followers,label=artist_name),size = 2)+
+  xlab("Genre") + 
+  ylab("Followers per Artist")
+
+p + scale_fill_gradient(low = "#56B4E9",high ="#E69F00") 
+```
+
+- Clearly Pop music artists have more followers.
+- Drake and Eminem have considerably more followers than other rap artists.
+- Jazz musicians release way more albums than other musicians.
+
+### Hypothesis testing
+
+Using Central limit theorem, we can perform a z- test to check if pop music artists have significantly higher followers than the rest. 
+
+```{r}
+mu <- mean(artists_followers$followers)
+sd <- sd(artists_followers$followers)
+x_bar <- mean((artists_followers %>% filter(genre == "pop"))$followers)
+
+n <- dim(artists_followers %>% filter(genre == "pop"))[1]
+
+z <- (x_bar - mu)/(sd/(sqrt(n)))
+
+cri <- qnorm(0.95)
+
+rejection_z_test <- function(x){
+  y <- dnorm(x,0,1)
+  y[x<cri] <- NA
+  y
+}
+
+ggplot(data.frame(x = c(-10, 10)), aes(x)) +
+  stat_function(fun = dnorm,geom = "line")+
+  stat_function(fun = function(x){rejection_z_test(x)}, geom = "area", fill = "red")+
+  geom_vline(xintercept = z, linetype = 'dashed') + xlab('Z')+ylab('F(x)')
+
+```
+
+Our Z value is significantly higher than the critical value of Z(alpha = 0.05). So we reject the null hypothesis and accept alternative hypothesis that pop artists have significantly higher followers than other genre artists.
+
+```{r}
+head(artists_followers)
+```
+
+Acousicness, Instrumentalness and liveness can define the nature of a song. We can visualize it for genre by looking at the mean value and variance of these features.
+
+```{r}
+nature_columns <- c("acousticness","instrumentalness","liveness")
+
+p1 <- df %>% dplyr::group_by(genre) %>%
+  dplyr::summarise(mu = mean(na.omit(acousticness)), variance = var(na.omit(acousticness))) %>%
+  ggplot(aes(genre,mu)) + 
+  geom_point(aes(color = genre, size = variance), alpha = 0.6, show.legend = FALSE)+
+  scale_size_continuous(range = c(5,10))+ylim(c(0,1)) + xlab("Acousticness")+ ylab("") +
+  theme(axis.text.y=element_blank(),axis.ticks.y=element_blank(),axis.text.x=element_text(angle=75, hjust=1))
+
+p2 <- df  %>% dplyr::group_by(genre) %>% 
+  dplyr::summarise(mu = mean(na.omit(instrumentalness)), variance = var(na.omit(instrumentalness))) %>%
+  ggplot(aes(genre,mu)) + 
+  geom_point(aes(color = genre, size = variance), alpha = 0.6, show.legend = FALSE)+
+  scale_size_continuous(range = c(5,10))+ylim(c(0,1)) + xlab("Instrumentalness")+ylab("") +
+  theme(axis.text.y=element_blank(),axis.ticks.y=element_blank(),axis.text.x=element_text(angle=75, hjust=1))
+
+p3 <- df %>% dplyr::group_by(genre) %>% 
+  dplyr::summarise(mu = mean(na.omit(liveness)), variance = var(na.omit(liveness))) %>%
+  ggplot(aes(genre,mu)) + 
+  geom_point(aes(color = genre, size = variance), alpha = 0.6, show.legend = FALSE)+
+  scale_size_continuous(range = c(5,10))+ylim(c(0,1)) + xlab("Liveness")+ylab("") +
+  theme(axis.text.y=element_blank(),axis.ticks.y=element_blank(),axis.text.x=element_text(angle=75, hjust=1))
+
+
+grid.arrange(p1,p2,p3, ncol = 3)
+
+```
+- Country music has very less Instrumentality. It doesn't have a lot of variance either.
+- EDM doesn't have a lot of liveness.
+- Jazz and Lounge are way more acoustic than other genres.
+
+
+We can take a further look into the other features we have to get more insight into these genres and also how time has affected them.
+
+```{r}
+colnames(df)
+
+further_analysis <- c("energy","danceability","key","duration_ms","loudness","mode", "valence","tempo","key_mode","key_name")
+
+```
+
+```{r}
+df %>% dplyr::filter(album_release_year >= 1970) %>%
+  ggplot(aes(album_release_year,duration_ms,color = genre)) + geom_point()
+```
+```{r}
+valence <- df %>% dplyr::filter(album_release_year >= 2000) %>%
+  dplyr::group_by(genre,album_release_year) %>% 
+  dplyr::summarize(quant25 = quantile(valence, probs = 0.25,na.rm = TRUE),
+            quant50 = quantile(valence, probs = 0.50,na.rm = TRUE),
+            quant75 = quantile(valence, probs = 0.75,na.rm = TRUE))
+
+ valence %>% ggplot(aes(album_release_year,quant50)) + geom_segment(aes(x = album_release_year,
+                                         xend = album_release_year,
+                                         y = quant25,
+                                         yend = quant75)) +
+   geom_point()+geom_line()+facet_wrap(~genre)
+
+```
+
+```{r}
+danceability <- df %>% dplyr::filter(album_release_year >= 2000) %>%
+  dplyr::group_by(genre,album_release_year) %>% 
+  dplyr::summarize(quant25 = quantile(danceability, probs = 0.25,na.rm = TRUE),
+            quant50 = quantile(danceability, probs = 0.50,na.rm = TRUE),
+            quant75 = quantile(danceability, probs = 0.75,na.rm = TRUE))
+
+danceability %>% ggplot(aes(album_release_year,quant50)) + geom_segment(aes(x = album_release_year,
+                                         xend = album_release_year,
+                                         y = quant25,
+                                         yend = quant75)) +
+   geom_point()+geom_line()+facet_wrap(~genre)
+```
+
+
+```{r}
+valence <- df %>% 
+  dplyr::filter(album_release_year >= 2000 & genre %in% c("indie","pop","rap")) %>% 
+  dplyr::group_by(genre,album_release_year) %>% 
+  dplyr::summarize(quant25 = quantile(valence, probs = 0.25,na.rm = TRUE),
+            quant50 = quantile(valence, probs = 0.50,na.rm = TRUE),
+            quant75 = quantile(valence, probs = 0.75,na.rm = TRUE))
+
+ valence %>% ggplot(aes(album_release_year,quant50)) + geom_segment(aes(x = album_release_year,
+                                         xend = album_release_year,
+                                         y = quant25,
+                                         yend = quant75)) +
+   xlab("Year")+ylab("Valence")+
+   geom_point()+geom_line()+facet_wrap(~genre,ncol = 3)
+```
+Valence is a measure of positivity in a song and there is a clear downward trend for pop and rap music while indie is becoming more positive. 
+
+```{r}
+danceability <- df %>% 
+  dplyr::filter(album_release_year >= 2000 & genre %in% c("indie","pop","country")) %>%
+  dplyr::group_by(genre,album_release_year) %>% 
+  dplyr::summarize(quant25 = quantile(danceability, probs = 0.25,na.rm = TRUE),
+            quant50 = quantile(danceability, probs = 0.50,na.rm = TRUE),
+            quant75 = quantile(danceability, probs = 0.75,na.rm = TRUE))
+
+danceability %>% ggplot(aes(album_release_year,quant50)) + geom_segment(aes(x = album_release_year,
+                                         xend = album_release_year,
+                                         y = quant25,
+                                         yend = quant75)) +
+  xlab("Year")+ylab("Danceability")+ 
+  geom_point()+geom_line()+facet_wrap(~genre)
+
+```
+Pop music was way more danceable in the 2000s when pop music was dominated by beyonce, britney spears where as now it's dominated by taylor swift, ed sheeran etc.,
+
+Indie music became more danceable during 2015 due to tik-tok.
+
+```{r}
+unique(df %>% select(key,key_mode,key_name,mode))
+
+```
+
+Key in which the music is played plays an important role. This can perhaps give us an insight into what genres are similar in the key they use and if any genre is very particular.
+
+```{r}
+df %>% filter(key_mode != "NA NA") %>% dplyr::group_by(genre,key_name) %>% 
+  dplyr::tally() %>% dplyr::group_by(genre) %>% dplyr::mutate(perc = (n/sum(n))*100) %>%
+  ggplot(aes(genre,key_name,fill=perc)) + geom_raster() +
+  scale_fill_gradient(low = "white",high = "brown")
+```
+- rap music is mostly played at C# key
+- Jazz and longue are similar to each other.
+
+```{r}
+df %>% dplyr::filter(key_mode != "NA NA") %>% 
+  dplyr::group_by(genre,mode) %>% dplyr::tally() %>% 
+  dplyr::group_by(genre) %>% dplyr::mutate(Mode = as.factor(mode),perc = (n/sum(n))*100) %>%
+  ggplot(aes(genre,perc,fill=Mode)) + geom_bar(stat = 'identity')+
+  scale_fill_manual(values=c("#1DB954",
+                             "Black"))+
+  xlab("")+ylab("")
+```
+```{r}
+colnames(df)
+```
+
+Although these features can help us understand music genres to a certain extent, we can look for a way where we can use distance metrics.
+
+### Distances
+
+```{r}
+song_features_num <- c("danceability","energy","loudness","acousticness","instrumentalness",
+                   "liveness","valence","tempo")
+
+song_features_cat <- c("key_name","key_mode","mode")
+```
+
+```{r}
+identifiers <- c("track_id","track_name","genre")
+
+data <- df %>% select(any_of(c(identifiers,song_features_num,song_features_cat)))
+```
+
+It is important to scale the numerical data in any distance metrics.
+
+
+```{r}
+data <- data %>% dplyr::group_by(genre) %>% sample_n(1000)
+
+for (col in song_features_num){
+  data[,col] = (data[,col] - min(data[,col]))/(max(data[,col])-min(data[,col]))
+}
+```
+
+
+```{r}
+modes <- data %>% 
+  dplyr::group_by(mode) %>% 
+  dplyr::summarize(mode_prob = (n())/(dim(data)[1]))
+keys <- data %>% 
+  dplyr::group_by(key_name) %>% 
+  dplyr::summarize(key_name_prob = (n())/(dim(data)[1]))
+key_modes <- data %>% 
+  dplyr::group_by(key_mode) %>% 
+  dplyr::summarize(key_mode_prob = (n())/(dim(data)[1]))
+modes
+```
+
+```{r}
+data <- left_join(data,modes,by="mode")
+data <- left_join(data,keys,by="key_name")
+data <- left_join(data,key_modes,by="key_mode")
+```
+
+
+
+```{r}
+class(data)
+```
+```{r}
+class(df)
+```
+
+
+```{r}
+song_features_cat <- c("key_name_prob", "key_mode_prob", "mode_prob")
+```
+
+```{r}
+a <- data[,c(song_features_num,song_features_cat)]
+class(a)
+```
+
+Euclidean distance:
+$$ dis =\sqrt{\sum(x_i-y_i)^2}  $$
+
+This doesn't include the categorical features, so we can update it with the distance:
+
+$$ dis =\sqrt{\sum_{num}(x_i-y_i)^2+\sum_{cat}(\delta_{ij}P_iP_j+(1-\delta_{ij})(1-P_iP_j)}  $$
+```{r}
+distance_prob <- function(v1,v2){
+  sqrt(sum((v1[1:8]-v2[1:8])^2) +
+         sum((v1[9:11] == v2[9:11])*v1[9:11]*v2[9:11])+
+         sum((v1[9:11] != v2[9:11])*(1-v1[9:11]*v2[9:11])))
+}
+```
+
+We can use this distance to calculate the mean of distances within a genre and average distances between the combinations of two clusters.
+
+
+```{r}
+genre_df1 <- data.frame(genre1 = unique(data$genre))
+genre_df2 <- data.frame(genre2 = unique(data$genre))
+genre_df <- crossing(genre_df1,genre_df2)
+```
+
+```{r}
+genre_df$distance <- NA
+genre_df
+```
+```{r}
+for (i in 1:dim(genre_df)[1]){
+  #print(i)
+  genre_1 <- genre_df$genre1[[i]]
+  genre_2 <- genre_df$genre2[[i]]
+  a <- data[data$genre == genre_1,c(song_features_num,song_features_cat)]
+  b <- data[data$genre == genre_2,c(song_features_num,song_features_cat)]
+  #print(genre_1)
+  #print(genre_2)
+  mat <- proxy::dist(a,b,method = distance_prob)
+  if (genre_1 == genre_2){
+    val <- mean(mat[upper.tri(mat)])
+  }
+  else{
+    val <- mean(mat)
+  }
+  genre_df$distance[[i]] = val
+}
+```
+
+```{r}
+genre_df
+```
+```{r}
+genre_df %>% ggplot(aes(genre1,genre2,size=distance)) + 
+  geom_point(color = 'brown',alpha = 0.9)+
+  scale_size_continuous(range = c(1,12)) + xlab("")+ylab("")+
+  theme(legend.position = "none")
+```
+- rap and country music are very close within the genre.
+- Jazz and lounge music has similar patterns and are very different from EDM and Alternative which are similar as well.
+
+### Principal Component Analysis (PCA)
+
+PCA is a dimensionality reduction which creates linear combinations of features that explain maximum variance in a dataset. However, it doesn't incorporate categorical features.
+
+
+
+
+```{r}
+pc <- prcomp(data[,song_features_num],center = TRUE)
+```
+```{r}
+attributes(pc)
+```
+```{r}
+pc$center
+```
+
+```{r}
+print(pc)
+```
+```{r}
+summary(pc)
+```
+
+```{r}
+components <- seq(1,8)
+variances <- c(0.4310, 0.6079, 0.7487, 0.8661, 0.91977, 0.96170, 0.99578, 1.00000)
+data.frame(components,variances) %>% ggplot(aes(components,variances)) + geom_point()+
+  geom_line()
+```
+The first two principal components explain about 60% of the variance.
+
+```{r}
+pca_df <- data.frame(predict(pc,data[,song_features_num]))
+data_pca <- cbind(data,pca_df)
+
+```
+
+Let us take a look at the first two principal components although it only explains 60% of the variance.
+
+```{r}
+data_pca %>% ggplot(aes(PC1,PC2,color = genre)) + geom_point() + xlab("") + ylab("")
+```
+The scatter plot isn't very clear. There is a better way to represent this. We can think of genres as a cluster and get the centroid of each genre and the average of distances to this centroid as a radius.
+
+```{r}
+data_pca <- data_pca %>% dplyr::group_by(genre) %>% dplyr::mutate(PC1_mean = mean(PC1),
+                                                      PC2_mean = mean(PC2)) %>%
+  dplyr::mutate(distance = (PC1-PC1_mean)^2+(PC2-PC2_mean)^2)
+```
+
+```{r}
+head(data_pca)
+```
+```{r}
+genre_pca <- data_pca %>% dplyr::group_by(genre) %>% dplyr::summarise(PC1 = mean(PC1_mean),
+                                                                      PC2 = mean(PC2_mean),
+                                                                      R = mean(distance))
+genre_pca
+```
+```{r}
+library(ggforce)
+
+genre_pca %>% ggplot()+geom_circle(aes(x0 = PC1,
+                                       y0 = PC2,
+                                       r = R,
+                                       fill = R,
+                                       alpha = 0.3))+
+  geom_point(aes(PC1,PC2))+
+  geom_text_repel(aes(PC1,PC2,label=genre),size = 3)+
+  theme(axis.text.y=element_blank(),axis.text.x=element_blank(),legend.position = "none")+
+  xlab("")+ylab("")
+```
+This does establish a lot of things we inferenced previously. Jazz and lounge are very similar so are edm and alternative to an extent. Rap music is very less variant. Surprisingly Pop and Country are closer to each other.
